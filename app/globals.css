@@ -307,6 +307,7 @@ input {
   overflow: hidden;
   cursor: none;
   user-select: none;
+  touch-action: manipulation;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   background:
@@ -355,6 +356,7 @@ input {
   height: min(100%, 78%);
   min-height: 220px;
   overflow: hidden;
+  touch-action: manipulation;
   transform:
     translate3d(var(--punch-dx), var(--punch-dy), 0)
     rotate(var(--punch-tilt));

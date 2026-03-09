@@ -262,7 +262,7 @@ export default function PhotoBender() {
   }
 
   function handlePunch(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!activeTarget || event.pointerType === "touch") {
+    if (!activeTarget) {
       return;
     }
 
