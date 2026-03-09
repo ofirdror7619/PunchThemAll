@@ -34,6 +34,7 @@ type PunchMark = {
 
 const MAX_PHOTOS = 3;
 const MAX_BRUISE_MARKS = 9;
+const PUNCH_SOUND_OFFSET = 0.18;
 const defaultTargets: UploadPhoto[] = [
   { id: "default-bibi", name: "Bibi.jpg", url: "/Bibi.jpg", type: "built-in target", size: 0 },
   { id: "default-trump", name: "Trump.jpg", url: "/Trump.jpg", type: "built-in target", size: 0 },
@@ -73,6 +74,8 @@ function getBruisePalette(damageLevel: number) {
 export default function PhotoBender() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const punchTimeoutRef = useRef<number | null>(null);
+  const punchAudioPoolRef = useRef<HTMLAudioElement[]>([]);
+  const punchAudioIndexRef = useRef(0);
   const [uploadedPhoto, setUploadedPhoto] = useState<UploadPhoto | null>(null);
   const [uploadCount, setUploadCount] = useState(0);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
@@ -99,6 +102,29 @@ export default function PhotoBender() {
       if (punchTimeoutRef.current) {
         window.clearTimeout(punchTimeoutRef.current);
       }
+
+      punchAudioPoolRef.current.forEach((audio) => {
+        audio.pause();
+        audio.src = "";
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextAudioPool = Array.from({ length: 4 }, () => {
+      const audio = new Audio("/punch.mp3");
+      audio.preload = "auto";
+      audio.volume = 0.45;
+      return audio;
+    });
+
+    punchAudioPoolRef.current = nextAudioPool;
+
+    return () => {
+      nextAudioPool.forEach((audio) => {
+        audio.pause();
+        audio.src = "";
+      });
     };
   }, []);
 
@@ -218,6 +244,22 @@ export default function PhotoBender() {
     setStageReloadKey((currentKey) => currentKey + 1);
   }
 
+  function playPunchSound() {
+    const audioPool = punchAudioPoolRef.current;
+
+    if (audioPool.length === 0) {
+      return;
+    }
+
+    const audio = audioPool[punchAudioIndexRef.current % audioPool.length];
+    punchAudioIndexRef.current += 1;
+
+    audio.currentTime = PUNCH_SOUND_OFFSET;
+    void audio.play().catch(() => {
+      // Ignore autoplay-style failures until the browser allows playback.
+    });
+  }
+
   function handlePunch(event: ReactPointerEvent<HTMLDivElement>) {
     if (!activeTarget || event.pointerType === "touch") {
       return;
@@ -232,6 +274,7 @@ export default function PhotoBender() {
     const dy = (y - 50) / 50;
     const nextPunchCount = punchCount + 1;
 
+    playPunchSound();
     setImpactPoint({ x, y, dx, dy });
     setIsPunching(true);
     setPunchCount(nextPunchCount);
