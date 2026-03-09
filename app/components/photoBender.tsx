@@ -399,7 +399,7 @@ export default function PhotoBender() {
               </div>
             ) : (
               <div className="empty-stage">
-                <span>Drop in a face for the center stage.</span>
+                <span>Upload a face and unleash the rage.</span>
               </div>
             )}
           </div>
