@@ -514,17 +514,17 @@ input {
 
 .thumbnail-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
   margin-top: 12px;
 }
 
 .thumbnail-card {
   display: grid;
-  gap: 8px;
-  padding: 9px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid rgba(164, 198, 255, 0.1);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(10, 18, 31, 0.84);
   color: var(--foreground);
   text-align: left;
@@ -534,15 +534,15 @@ input {
   width: 100%;
   aspect-ratio: 1 / 0.82;
   object-fit: cover;
-  max-height: 92px;
-  border-radius: 10px;
+  max-height: 78px;
+  border-radius: 9px;
 }
 
 .thumbnail-card span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.76rem;
+  font-size: 0.71rem;
 }
 
 .thumbnail-card.is-active {
@@ -552,13 +552,13 @@ input {
 
 .empty-slot {
   place-items: center;
-  min-height: 116px;
+  min-height: 102px;
   background: rgba(255, 255, 255, 0.02);
   border-style: dashed;
 }
 
 .empty-slot-image {
-  max-height: 76px;
+  max-height: 62px;
   width: auto;
   opacity: 0.78;
   filter: saturate(0.92) contrast(1.02);
@@ -657,6 +657,10 @@ input {
   .thumbnail-grid,
   .intro-card-list {
     grid-template-columns: 1fr;
+  }
+
+  .thumbnail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .stage-header,
