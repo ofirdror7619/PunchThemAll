@@ -57,7 +57,7 @@ const HEAVY_HOLD_MS = 320;
 const DOUBLE_TAP_WINDOW_MS = 240;
 const COMBO_RESET_WINDOW_MS = 1250;
 const defaultTargets: UploadPhoto[] = [
-  { id: "default-malik-al-houthi", name: "Malik al-Houthi.jpg", url: "/Malik%20al-Houthi.jpg", type: "built-in target", size: 0 },
+  { id: "default-naim-qassem", name: "NaimQassem.jpg", url: "/NaimQassem.jpg", type: "built-in target", size: 0 },
   { id: "default-trump", name: "Trump.jpg", url: "/Trump.jpg", type: "built-in target", size: 0 },
   { id: "default-khamenei", name: "Khamenei.jpg", url: "/Khamenei.jpg", type: "built-in target", size: 0 },
   { id: "default-erdogan", name: "Erdogan.jpg", url: "/Erdogan.jpg", type: "built-in target", size: 0 },
