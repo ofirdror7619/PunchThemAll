@@ -35,7 +35,7 @@ type PunchMark = {
 const MAX_BRUISE_MARKS = 9;
 const PUNCH_SOUND_OFFSET = 0.18;
 const defaultTargets: UploadPhoto[] = [
-  { id: "default-bibi", name: "Bibi.jpg", url: "/Bibi.jpg", type: "built-in target", size: 0 },
+  { id: "default-malik-al-houthi", name: "Malik al-Houthi.jpg", url: "/Malik%20al-Houthi.jpg", type: "built-in target", size: 0 },
   { id: "default-trump", name: "Trump.jpg", url: "/Trump.jpg", type: "built-in target", size: 0 },
   { id: "default-khamenei", name: "Khamenei.jpg", url: "/Khamenei.jpg", type: "built-in target", size: 0 },
   { id: "default-erdogan", name: "Erdogan.jpg", url: "/Erdogan.jpg", type: "built-in target", size: 0 },
