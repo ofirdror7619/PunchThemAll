@@ -603,6 +603,32 @@ input {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.hud-instructions {
+  margin-top: auto;
+  padding-top: 56px;
+}
+
+.instruction-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.instruction-row {
+  padding: 12px 14px;
+  border: 1px solid rgba(164, 198, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.instruction-row strong {
+  color: var(--foreground);
+}
+
+.instruction-row span {
+  color: rgba(237, 243, 255, 0.72);
+}
+
 .meter-track {
   height: 10px;
   margin-top: 14px;
@@ -614,8 +640,25 @@ input {
 .meter-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent-deep), var(--accent-soft));
-  box-shadow: 0 0 20px rgba(103, 212, 255, 0.32);
+  transition:
+    width 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.meter-fill.is-healthy {
+  background: linear-gradient(90deg, #1fbf75, #8cf7c9);
+  box-shadow: 0 0 20px rgba(101, 235, 171, 0.28);
+}
+
+.meter-fill.is-warning {
+  background: linear-gradient(90deg, #d6a117, #ffe171);
+  box-shadow: 0 0 20px rgba(255, 210, 87, 0.26);
+}
+
+.meter-fill.is-critical {
+  background: linear-gradient(90deg, #d53a2f, #ff8a66);
+  box-shadow: 0 0 20px rgba(255, 108, 86, 0.28);
 }
 
 .hud-note {

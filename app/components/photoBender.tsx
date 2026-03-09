@@ -30,10 +30,32 @@ type PunchMark = {
   stretchX: number;
   stretchY: number;
   damageLevel: number;
+  punchType: PunchType;
+  intensity: number;
+};
+
+type PunchType = "jab" | "heavy" | "combo";
+
+type ImpactState = {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  tilt: number;
+  flash: number;
+  ring: number;
+  ringOuter: number;
+  shakeX: number;
+  shakeY: number;
+  shakeRotate: number;
 };
 
 const MAX_BRUISE_MARKS = 9;
 const PUNCH_SOUND_OFFSET = 0.18;
+const RESULTS_THRESHOLD = 20;
+const HEAVY_HOLD_MS = 320;
+const DOUBLE_TAP_WINDOW_MS = 240;
+const COMBO_RESET_WINDOW_MS = 1250;
 const defaultTargets: UploadPhoto[] = [
   { id: "default-malik-al-houthi", name: "Malik al-Houthi.jpg", url: "/Malik%20al-Houthi.jpg", type: "built-in target", size: 0 },
   { id: "default-trump", name: "Trump.jpg", url: "/Trump.jpg", type: "built-in target", size: 0 },
@@ -41,6 +63,24 @@ const defaultTargets: UploadPhoto[] = [
   { id: "default-erdogan", name: "Erdogan.jpg", url: "/Erdogan.jpg", type: "built-in target", size: 0 },
   { id: "default-putin", name: "Putin.jpg", url: "/Putin.jpg", type: "built-in target", size: 0 },
 ];
+
+const initialImpactState: ImpactState = {
+  x: 50,
+  y: 50,
+  dx: 0,
+  dy: 0,
+  tilt: 0,
+  flash: 0.42,
+  ring: 10,
+  ringOuter: 18,
+  shakeX: 0,
+  shakeY: 0,
+  shakeRotate: 0,
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function getDisplayName(name: string) {
   return name.replace(/\.(jpg|jpeg|png|webp|gif|bmp|svg)$/i, "");
@@ -75,8 +115,13 @@ function getBruisePalette(damageLevel: number) {
 export default function PhotoBender() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const punchTimeoutRef = useRef<number | null>(null);
+  const comboResetTimeoutRef = useRef<number | null>(null);
+  const heavyHoldTimeoutRef = useRef<number | null>(null);
   const punchAudioPoolRef = useRef<HTMLAudioElement[]>([]);
   const punchAudioIndexRef = useRef(0);
+  const heavyPressTriggeredRef = useRef(false);
+  const lastTapTimeRef = useRef(0);
+  const lastComboTimeRef = useRef(0);
   const [uploadedPhoto, setUploadedPhoto] = useState<UploadPhoto | null>(null);
   const [uploadCount, setUploadCount] = useState(0);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
@@ -87,8 +132,12 @@ export default function PhotoBender() {
   const [isStageHovered, setIsStageHovered] = useState(false);
   const [isPunching, setIsPunching] = useState(false);
   const [punchCount, setPunchCount] = useState(0);
+  const [comboCount, setComboCount] = useState(0);
+  const [bestCombo, setBestCombo] = useState(0);
+  const [cleanHitCount, setCleanHitCount] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
   const [punchMarks, setPunchMarks] = useState<PunchMark[]>([]);
-  const [impactPoint, setImpactPoint] = useState({ x: 50, y: 50, dx: 0, dy: 0 });
+  const [impactPoint, setImpactPoint] = useState<ImpactState>(initialImpactState);
 
   useEffect(() => {
     return () => {
@@ -102,6 +151,14 @@ export default function PhotoBender() {
     return () => {
       if (punchTimeoutRef.current) {
         window.clearTimeout(punchTimeoutRef.current);
+      }
+
+      if (comboResetTimeoutRef.current) {
+        window.clearTimeout(comboResetTimeoutRef.current);
+      }
+
+      if (heavyHoldTimeoutRef.current) {
+        window.clearTimeout(heavyHoldTimeoutRef.current);
       }
 
       punchAudioPoolRef.current.forEach((audio) => {
@@ -162,6 +219,29 @@ export default function PhotoBender() {
     return defaultTargets.find((target) => target.id === activeTargetId) ?? null;
   }, [activeTargetId, uploadedPhoto]);
 
+  const damageProgress = useMemo(() => {
+    if (!activeTarget) {
+      return 0;
+    }
+
+    return Math.min((punchCount + bestCombo * 1.35 + cleanHitCount * 0.9) / RESULTS_THRESHOLD, 1);
+  }, [activeTarget, bestCombo, cleanHitCount, punchCount]);
+
+  const damagePercent = Math.round(damageProgress * 100);
+  const lifePercent = activeTarget ? Math.max(100 - damagePercent, 0) : 0;
+  const damageTier = damageProgress >= 0.82 ? 4 : damageProgress >= 0.58 ? 3 : damageProgress >= 0.32 ? 2 : damageProgress > 0.08 ? 1 : 0;
+  const lifeState = lifePercent > 60 ? "is-healthy" : lifePercent > 30 ? "is-warning" : "is-critical";
+
+  const centerPanelStyle = useMemo(
+    () =>
+      ({
+        "--panel-shake-x": `${impactPoint.shakeX}px`,
+        "--panel-shake-y": `${impactPoint.shakeY}px`,
+        "--panel-shake-rotate": `${impactPoint.shakeRotate}deg`,
+      }) as CSSProperties,
+    [impactPoint.shakeRotate, impactPoint.shakeX, impactPoint.shakeY],
+  );
+
   const stageStyle = useMemo(
     () =>
       ({
@@ -169,21 +249,46 @@ export default function PhotoBender() {
         "--impact-y": `${impactPoint.y}%`,
         "--punch-dx": `${impactPoint.dx * 16}px`,
         "--punch-dy": `${impactPoint.dy * 12}px`,
-        "--punch-tilt": `${impactPoint.dx * 4.5}deg`,
+        "--punch-tilt": `${impactPoint.tilt}deg`,
+        "--impact-flash-alpha": impactPoint.flash.toFixed(2),
+        "--impact-ring-size": `${impactPoint.ring}%`,
+        "--impact-ring-outer-size": `${impactPoint.ringOuter}%`,
+        "--damage-progress": damageProgress.toFixed(2),
       }) as CSSProperties,
-    [impactPoint],
+    [damageProgress, impactPoint],
   );
 
-  function resetPunchEffects() {
+  function clearTransientTimers() {
     if (punchTimeoutRef.current) {
       window.clearTimeout(punchTimeoutRef.current);
       punchTimeoutRef.current = null;
     }
 
+    if (comboResetTimeoutRef.current) {
+      window.clearTimeout(comboResetTimeoutRef.current);
+      comboResetTimeoutRef.current = null;
+    }
+
+    if (heavyHoldTimeoutRef.current) {
+      window.clearTimeout(heavyHoldTimeoutRef.current);
+      heavyHoldTimeoutRef.current = null;
+    }
+  }
+
+  function resetPunchEffects() {
+    clearTransientTimers();
+
+    heavyPressTriggeredRef.current = false;
+    lastTapTimeRef.current = 0;
+    lastComboTimeRef.current = 0;
+
     setIsPunching(false);
     setPunchCount(0);
+    setComboCount(0);
+    setBestCombo(0);
+    setCleanHitCount(0);
     setPunchMarks([]);
-    setImpactPoint({ x: 50, y: 50, dx: 0, dy: 0 });
+    setImpactPoint(initialImpactState);
   }
 
   function selectTarget(targetId: string) {
@@ -245,7 +350,11 @@ export default function PhotoBender() {
     setStageReloadKey((currentKey) => currentKey + 1);
   }
 
-  function playPunchSound() {
+  function playPunchSound(punchType: PunchType, intensity: number) {
+    if (isMuted) {
+      return;
+    }
+
     const audioPool = punchAudioPoolRef.current;
 
     if (audioPool.length === 0) {
@@ -256,41 +365,97 @@ export default function PhotoBender() {
     punchAudioIndexRef.current += 1;
 
     audio.currentTime = PUNCH_SOUND_OFFSET;
+    audio.playbackRate = clamp(
+      (punchType === "heavy" ? 0.9 : punchType === "combo" ? 1.02 : 1.08) + (Math.random() * 0.08 - 0.04),
+      0.78,
+      1.16,
+    );
+    audio.volume = clamp((punchType === "heavy" ? 0.58 : punchType === "combo" ? 0.5 : 0.42) + intensity * 0.05, 0.25, 0.85);
     void audio.play().catch(() => {
       // Ignore autoplay-style failures until the browser allows playback.
     });
   }
 
-  function handlePunch(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!activeTarget) {
+  function triggerHaptics(punchType: PunchType) {
+    if (typeof navigator === "undefined" || !("vibrate" in navigator)) {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relativeX = ((event.clientX - bounds.left) / bounds.width) * 100;
-    const relativeY = ((event.clientY - bounds.top) / bounds.height) * 100;
-    const x = Math.min(86, Math.max(14, relativeX));
-    const y = Math.min(84, Math.max(16, relativeY));
+    const pattern = punchType === "heavy" ? [18, 18, 30] : punchType === "combo" ? [12, 10, 12] : 16;
+    navigator.vibrate(pattern);
+  }
+
+  function queueComboReset() {
+    if (comboResetTimeoutRef.current) {
+      window.clearTimeout(comboResetTimeoutRef.current);
+    }
+
+    comboResetTimeoutRef.current = window.setTimeout(() => {
+      setComboCount(0);
+    }, COMBO_RESET_WINDOW_MS);
+  }
+
+  function executePunch(clientX: number, clientY: number, bounds: DOMRect, punchType: PunchType) {
+    const relativeX = ((clientX - bounds.left) / bounds.width) * 100;
+    const relativeY = ((clientY - bounds.top) / bounds.height) * 100;
+    const typeStrength = punchType === "heavy" ? 1.4 : punchType === "combo" ? 1.16 : 0.92;
+    const jitterX = (Math.random() * 2 - 1) * 2.2 * typeStrength;
+    const jitterY = (Math.random() * 2 - 1) * 1.8 * typeStrength;
+    const x = clamp(relativeX + jitterX, 14, 86);
+    const y = clamp(relativeY + jitterY, 16, 84);
     const dx = (x - 50) / 50;
     const dy = (y - 50) / 50;
+    const tilt = dx * (punchType === "heavy" ? 7.6 : punchType === "combo" ? 6 : 4.5) + (Math.random() * 2 - 1) * 1.2;
+    const flash = punchType === "heavy" ? 0.68 : punchType === "combo" ? 0.58 : 0.44 + Math.random() * 0.06;
+    const ring = punchType === "heavy" ? 13 + Math.random() * 4 : punchType === "combo" ? 11 + Math.random() * 3 : 8.5 + Math.random() * 2.2;
+    const ringOuter = ring * (punchType === "heavy" ? 2.1 : 1.85);
+    const shakeBase = punchType === "heavy" ? 5.8 : punchType === "combo" ? 4.4 : 2.8;
     const nextPunchCount = punchCount + 1;
+    const isCleanHit = Math.abs(x - 50) <= 15 && Math.abs(y - 48) <= 17;
+    const now = Date.now();
+    const nextCombo = now - lastComboTimeRef.current <= COMBO_RESET_WINDOW_MS ? comboCount + 1 : 1;
 
-    playPunchSound();
-    setImpactPoint({ x, y, dx, dy });
+    lastComboTimeRef.current = now;
+    queueComboReset();
+
+    playPunchSound(punchType, typeStrength);
+    triggerHaptics(punchType);
+    setImpactPoint({
+      x,
+      y,
+      dx,
+      dy,
+      tilt,
+      flash,
+      ring,
+      ringOuter,
+      shakeX: (Math.random() * 2 - 1) * shakeBase,
+      shakeY: (Math.random() * 2 - 1) * (shakeBase * 0.8),
+      shakeRotate: (Math.random() * 2 - 1) * (shakeBase * 0.18),
+    });
     setIsPunching(true);
     setPunchCount(nextPunchCount);
+    setComboCount(nextCombo);
+    setBestCombo((currentBest) => Math.max(currentBest, nextCombo));
+
+    if (isCleanHit) {
+      setCleanHitCount((currentCount) => currentCount + 1);
+    }
+
     setPunchMarks((currentMarks) => {
       const nextMark: PunchMark = {
         id: Date.now(),
         x,
         y,
-        size: 7.5 + Math.random() * 6.5,
-        rotation: -38 + Math.random() * 76,
-        opacity: 0.24 + Math.random() * 0.18,
-        wrinkleOffset: 8 + Math.random() * 8,
-        stretchX: 0.84 + Math.random() * 0.34,
-        stretchY: 0.82 + Math.random() * 0.3,
-        damageLevel: Math.min(nextPunchCount / 10, 1),
+        size: (punchType === "heavy" ? 11.8 : punchType === "combo" ? 10.2 : 7.4) + Math.random() * 4.8,
+        rotation: -42 + Math.random() * 84,
+        opacity: (punchType === "heavy" ? 0.38 : punchType === "combo" ? 0.33 : 0.24) + Math.random() * 0.16,
+        wrinkleOffset: (punchType === "heavy" ? 12 : 9) + Math.random() * 7,
+        stretchX: 0.8 + Math.random() * 0.4 + (punchType === "heavy" ? 0.08 : 0),
+        stretchY: 0.78 + Math.random() * 0.34 + (punchType === "combo" ? 0.04 : 0),
+        damageLevel: Math.min((nextPunchCount + nextCombo * 0.7 + (isCleanHit ? 1 : 0)) / RESULTS_THRESHOLD, 1),
+        punchType,
+        intensity: typeStrength,
       };
 
       return [...currentMarks.slice(-(MAX_BRUISE_MARKS - 1)), nextMark];
@@ -303,6 +468,58 @@ export default function PhotoBender() {
     punchTimeoutRef.current = window.setTimeout(() => {
       setIsPunching(false);
     }, 180);
+  }
+
+  function handlePunchPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!activeTarget) {
+      return;
+    }
+
+    heavyPressTriggeredRef.current = false;
+
+    if (heavyHoldTimeoutRef.current) {
+      window.clearTimeout(heavyHoldTimeoutRef.current);
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+
+    heavyHoldTimeoutRef.current = window.setTimeout(() => {
+      heavyPressTriggeredRef.current = true;
+      executePunch(clientX, clientY, bounds, "heavy");
+    }, HEAVY_HOLD_MS);
+  }
+
+  function handlePunchPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!activeTarget) {
+      return;
+    }
+
+    if (heavyHoldTimeoutRef.current) {
+      window.clearTimeout(heavyHoldTimeoutRef.current);
+      heavyHoldTimeoutRef.current = null;
+    }
+
+    if (heavyPressTriggeredRef.current) {
+      heavyPressTriggeredRef.current = false;
+      return;
+    }
+
+    const now = Date.now();
+    const punchType: PunchType = now - lastTapTimeRef.current <= DOUBLE_TAP_WINDOW_MS ? "combo" : "jab";
+    lastTapTimeRef.current = now;
+
+    executePunch(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), punchType);
+  }
+
+  function cancelPunchHold() {
+    if (heavyHoldTimeoutRef.current) {
+      window.clearTimeout(heavyHoldTimeoutRef.current);
+      heavyHoldTimeoutRef.current = null;
+    }
+
+    heavyPressTriggeredRef.current = false;
   }
 
   return (
@@ -352,13 +569,26 @@ export default function PhotoBender() {
           </div>
         </aside>
 
-        <section key={resetKey} className="panel center-panel">
+        <section
+          key={resetKey}
+          className={`panel center-panel${isPunching ? " is-shaking" : ""}`}
+          style={centerPanelStyle}
+        >
           <div className="stage-header">
             <div>
               <p className="stage-label">Main Window</p>
               <h2>{activeTarget ? getDisplayName(activeTarget.name) : "Awaiting first target"}</h2>
             </div>
             <div className="stage-actions">
+              <button
+                type="button"
+                className={`mute-toggle${isMuted ? " is-muted" : ""}`}
+                onClick={() => setIsMuted((currentValue) => !currentValue)}
+                aria-label={isMuted ? "Unmute punch audio" : "Mute punch audio"}
+                title={isMuted ? "Unmute punch audio" : "Mute punch audio"}
+              >
+                {isMuted ? "Muted" : "Sound On"}
+              </button>
               {activeTarget ? (
                 <button
                   type="button"
@@ -370,7 +600,9 @@ export default function PhotoBender() {
                   ↻
                 </button>
               ) : null}
-              <span className="status-pill">{activeTarget ? "Target Locked" : "No Target Selected"}</span>
+              <span className="status-pill">
+                {activeTarget ? (comboCount > 1 ? `Combo x${comboCount}` : "Target Locked") : "No Target Selected"}
+              </span>
             </div>
           </div>
 
@@ -383,8 +615,12 @@ export default function PhotoBender() {
             {activeTarget ? (
               <div
                 key={`${activeTarget.id}-${stageReloadKey}`}
-                className="stage-image-frame"
-                onPointerDown={handlePunch}
+                className={`stage-image-frame damage-tier-${damageTier}`}
+                onPointerDown={handlePunchPointerDown}
+                onPointerUp={handlePunchPointerUp}
+                onPointerLeave={cancelPunchHold}
+                onPointerCancel={cancelPunchHold}
+                style={{ "--damage-progress": damageProgress.toFixed(2) } as CSSProperties}
               >
                 <Image
                   className="stage-image"
@@ -395,6 +631,7 @@ export default function PhotoBender() {
                   unoptimized
                   draggable={false}
                 />
+                <div className={`damage-progression-layer damage-tier-${damageTier}`} aria-hidden="true" />
                 <div className="bruise-layer" aria-hidden="true">
                   {punchMarks.map((mark) => (
                     <span
@@ -403,8 +640,8 @@ export default function PhotoBender() {
                       style={{
                         left: `${mark.x}%`,
                         top: `${mark.y}%`,
-                        width: `${mark.size * (1 + mark.damageLevel * 0.32)}%`,
-                        height: `${mark.size * (0.68 + mark.damageLevel * 0.16)}%`,
+                        width: `${mark.size * (1 + mark.damageLevel * 0.32 + mark.intensity * 0.06)}%`,
+                        height: `${mark.size * (0.68 + mark.damageLevel * 0.16 + (mark.punchType === "heavy" ? 0.06 : 0))}%`,
                         opacity: mark.opacity,
                         transform: `translate(-50%, -50%) rotate(${mark.rotation}deg) scale(${mark.stretchX}, ${mark.stretchY})`,
                         ...getBruisePalette(mark.damageLevel),
@@ -426,14 +663,14 @@ export default function PhotoBender() {
                       <span
                         className="wrinkle-mark wrinkle-mark-one"
                         style={{
-                          width: `${mark.size * 0.92}%`,
+                          width: `${mark.size * (mark.punchType === "heavy" ? 1.12 : 0.92)}%`,
                           transform: `translate(-10%, -${mark.wrinkleOffset}%) rotate(${mark.rotation * -0.25}deg)`,
                         }}
                       />
                       <span
                         className="wrinkle-mark wrinkle-mark-two"
                         style={{
-                          width: `${mark.size * 0.76}%`,
+                          width: `${mark.size * (mark.punchType === "combo" ? 0.88 : 0.76)}%`,
                           transform: `translate(-4%, ${mark.wrinkleOffset}%) rotate(${mark.rotation * 0.35}deg)`,
                         }}
                       />
@@ -504,18 +741,44 @@ export default function PhotoBender() {
               <span>Hits</span>
               <strong>{activeTarget ? punchCount : 0}</strong>
             </div>
+            <div className="hud-row">
+              <span>Combo</span>
+              <strong>{activeTarget ? `x${comboCount}` : "-"}</strong>
+            </div>
+            <div className="hud-row">
+              <span>Best Streak</span>
+              <strong>{activeTarget ? `x${bestCombo}` : "-"}</strong>
+            </div>
           </div>
 
           <div className="hud-meter">
             <div className="hud-meter-label">
-              <span>Stage Energy</span>
-              <strong>{activeTarget ? Math.min(18 + punchCount * 9, 100) : 0}%</strong>
+              <span>Life</span>
+              <strong>{activeTarget ? lifePercent : 0}%</strong>
             </div>
             <div className="meter-track">
               <div
-                className="meter-fill"
-                style={{ width: `${activeTarget ? Math.min(18 + punchCount * 9, 100) : 0}%` }}
+                className={`meter-fill ${lifeState}`}
+                style={{ width: `${activeTarget ? lifePercent : 0}%` }}
               />
+            </div>
+          </div>
+
+          <div className="hud-instructions">
+            <p className="stage-label">Punch Types</p>
+            <div className="instruction-list">
+              <div className="instruction-row">
+                <strong>Tap: </strong>
+                <span>Jab for quick light hits.</span>
+              </div>
+              <div className="instruction-row">
+                <strong>Hold: </strong>
+                <span>Heavy punch for bigger damage.</span>
+              </div>
+              <div className="instruction-row">
+                <strong>Double Tap: </strong>
+                <span>Combo hit.</span>
+              </div>
             </div>
           </div>
         </aside>
